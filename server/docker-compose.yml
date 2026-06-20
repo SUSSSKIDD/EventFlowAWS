@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: eventflow-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/postgres/init-dbs.sql:/docker-entrypoint-initdb.d/init-dbs.sql
+      - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - eventflow-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: eventflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    networks:
+      - eventflow-network
+
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: eventflow-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=kinesis,s3
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - ./docker/localstack:/etc/localstack/init/ready.d
+      - localstack_data:/var/lib/localstack
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - eventflow-network
+
+  openobserve:
+    image: o2cr.ai/openobserve/openobserve-enterprise:v0.90.3
+    container_name: eventflow-openobserve
+    ports:
+      - "5080:5080"
+    environment:
+      - ZO_ROOT_USER_EMAIL=root@example.com
+      - ZO_ROOT_USER_PASSWORD=Complexpass#123
+      - ZO_DATA_DIR=/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    volumes:
+      - openobserve_data:/data
+    networks:
+      - eventflow-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  openobserve_data:
+  localstack_data:
+
+networks:
+  eventflow-network:
+    name: eventflow-network
+    driver: bridge

@@ -1,0 +1,12 @@
+dependencies {
+    implementation(project(':common')) {
+        exclude group: 'org.springframework.boot', module: 'spring-boot-starter-security'
+    }
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation platform('software.amazon.awssdk:bom:2.25.15')
+    implementation 'software.amazon.awssdk:kinesis'
+    implementation 'com.google.protobuf:protobuf-java:4.35.1'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'org.postgresql:postgresql'
+}

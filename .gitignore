@@ -1,0 +1,11 @@
+# Ignore everything in the root directory by default
+/*
+
+# Allow tracking of essential project directories and files
+!/client/
+!/server/
+!/README.md
+!/docker.md
+!/start-platform.sh
+!/.gitignore
+

@@ -1,0 +1,6 @@
+rootProject.name = 'eventflow'
+
+include 'common'
+include 'auth-service'
+include 'analytics-service'
+include 'reporting-service'

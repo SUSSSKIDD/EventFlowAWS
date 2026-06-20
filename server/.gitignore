@@ -1,0 +1,24 @@
+# Gradle build artifacts
+build/
+.gradle/
+out/
+!gradle-wrapper.jar
+
+# Go executables / binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Local environment and docker data
+.env
+.env.local
+docker/data/
+docker/postgres_data/
+docker/redis_data/
+docker/localstack_data/
+openobserve_data/

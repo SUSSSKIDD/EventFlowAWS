@@ -1,0 +1,61 @@
+{
+  "title": "EventFlow Platform Performance",
+  "description": "Dashboard for monitoring EventFlow Go Ingestion, Gateway, Kafka topic states, and PostgreSQL analytics health.",
+  "role": "",
+  "owner": "root@example.com",
+  "created": "2026-06-20T10:50:00Z",
+  "panels": [
+    {
+      "id": "panel_ingestion_rate",
+      "type": "area",
+      "title": "Event Ingestion Rate (events/sec)",
+      "description": "Real-time ingestion rate from the Go Ingestion service metrics.",
+      "layout": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "queries": [
+        {
+          "queryType": "promql",
+          "query": "sum(rate(event_ingestion_rate[1m]))"
+        }
+      ]
+    },
+    {
+      "id": "panel_ingestion_by_project",
+      "type": "bar",
+      "title": "Ingestion Share by Project",
+      "description": "Total events processed split by Project ID.",
+      "layout": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "queries": [
+        {
+          "queryType": "promql",
+          "query": "sum by (projectId) (increase(event_ingestion_rate[1h]))"
+        }
+      ]
+    },
+    {
+      "id": "panel_kafka_lag",
+      "type": "line",
+      "title": "Kafka Consumer Lag (analytics-service)",
+      "description": "Number of unconsumed events in the raw-events topic.",
+      "layout": { "x": 0, "y": 4, "w": 6, "h": 4 },
+      "queries": [
+        {
+          "queryType": "promql",
+          "query": "kafka_consumer_lag{topic=\"raw-events\"}"
+        }
+      ]
+    },
+    {
+      "id": "panel_db_events_count",
+      "type": "metric",
+      "title": "Total Events Saved (Postgres)",
+      "description": "Cumulative events stored in the analytics database.",
+      "layout": { "x": 6, "y": 4, "w": 6, "h": 4 },
+      "queries": [
+        {
+          "queryType": "sql",
+          "query": "SELECT count(*) as total_events FROM events"
+        }
+      ]
+    }
+  ]
+}
