@@ -112,6 +112,12 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 	r.Header.Del("X-Project-Id")
 
 	path := r.URL.Path
+	if path == "/swagger.json" {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "swagger.json")
+		return
+	}
+
 	var targetProxy *httputil.ReverseProxy
 	requiresAuth := true
 

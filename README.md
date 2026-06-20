@@ -80,7 +80,7 @@ flowchart TB
     
     KIN -->|5. Shard Polling| AS
     AS -->|6. Run Plugins| SPI
-    AS -->|7. JDBC Batch Write (ON CONFLICT DO NOTHING)| DB_ANALYTICS
+    AS -->|7. JDBC Batch Write - ON CONFLICT DO NOTHING| DB_ANALYTICS
     AS -->|Archive Cold Data| S3
     
     IS -->|Scrape Metrics| PROM
@@ -343,6 +343,7 @@ For a fully containerized deployment where the microservices themselves are buil
 | **POST** | `/events` | Yes (X-API-Key) | High-throughput telemetry event ingestion. |
 | **GET** | `/analytics/events` | Yes (JWT Bearer) | Fetch processed events for a project. |
 | **GET** | `/reports/summary` | Yes (JWT Bearer) | Retrieve aggregated telemetry reports. |
+| **GET** | `/swagger.json` | No | Serves the OpenAPI/Swagger JSON definition dynamically. |
 
 ### OpenAPI 3.0 (Swagger) Specification
 Save the following YAML schema block as `swagger.yaml` or paste it into a Swagger Editor:

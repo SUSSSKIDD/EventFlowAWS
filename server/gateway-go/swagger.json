@@ -1,0 +1,102 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EventFlow AWS Telemetry Ingestion API",
+    "version": "1.0.0",
+    "description": "High-throughput telemetry ingestion and real-time analytics API gateway."
+  },
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "summary": "Register User",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "User created" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Log In",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events": {
+      "post": {
+        "summary": "Ingest Telemetry Event",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["eventId", "userId", "eventName", "timestamp"],
+                "properties": {
+                  "eventId": { "type": "string", "format": "uuid" },
+                  "userId": { "type": "string" },
+                  "eventName": { "type": "string" },
+                  "timestamp": { "type": "string", "format": "date-time" },
+                  "properties": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Event accepted for asynchronous processing" },
+          "401": { "description": "Invalid API key" },
+          "409": { "description": "Duplicate eventId detected (Idempotency conflict)" }
+        }
+      }
+    }
+  }
+}
