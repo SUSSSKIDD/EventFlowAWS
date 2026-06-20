@@ -23,6 +23,7 @@ The ingestion pipeline is designed to process thousands of events per second wit
 
 ## 📐 1. System Architecture Design
 
+### 📡 1.1 Data Ingestion Flowchart
 ```mermaid
 flowchart TB
     %% Clients
@@ -40,7 +41,9 @@ flowchart TB
     %% Internal Microservices
     subgraph Ingestion["Ingestion Pipeline"]
         IS["Go Ingestion Service (Port 8082)"]
-        RED["Redis (Idempotency & API Caching)"]
+        L1["L1 Cache (In-Memory Map)"]
+        RED_CACHE["L2 Cache (Redis Caching apikey:*)"]
+        RED_IDEM["Idempotency Filter (Redis idempotency:*)"]
         DB_AUTH["PostgreSQL (auth_db)"]
     end
 
@@ -68,17 +71,77 @@ flowchart TB
     JWT -->|2. Route to Auth| DB_AUTH
     JWT -->|3. Route Ingestion| IS
     
-    IS -->|Check Idempotency & Cache| RED
-    IS -->|Fallback API Key Validate| DB_AUTH
+    IS -->|Step A: Lookup L1 Cache| L1
+    L1 -->|L1 Miss| RED_CACHE
+    RED_CACHE -->|L2 Miss| DB_AUTH
+    IS -->|Step B: Validate Duplicate Event| RED_IDEM
+    
     IS -->|4. Push Asynchronous Protobuf Batch| KIN
     
     KIN -->|5. Shard Polling| AS
     AS -->|6. Run Plugins| SPI
-    AS -->|7. JDBC Batch Write| DB_ANALYTICS
+    AS -->|7. JDBC Batch Write (ON CONFLICT DO NOTHING)| DB_ANALYTICS
     AS -->|Archive Cold Data| S3
     
     IS -->|Scrape Metrics| PROM
     AS -->|Export Logs & Telemetry| OO
+```
+
+### 📡 1.2 UML Sequence Diagram
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Gateway as Go API Gateway
+    participant Ingestion as Go Ingestion Service
+    participant Redis as Redis Cache
+    participant Postgres as PostgreSQL (auth_db)
+    participant Kinesis as AWS Kinesis Stream
+
+    Client->>Gateway: POST /events (with X-API-Key, Payload)
+    Note over Gateway: Sanitization: Strip client-supplied X-Project-Id
+    Gateway->>Gateway: Validate Route & JWT Signature
+    Gateway->>Ingestion: Forward request with validated headers
+    
+    %% API key check
+    Note over Ingestion: API Key validation
+    Ingestion->>Ingestion: Check L1 In-Memory Cache (1m TTL)
+    alt L1 Cache Hit
+        Note over Ingestion: Project ID resolved instantly
+    else L1 Cache Miss
+        Ingestion->>Redis: GET apikey:<key> (L2 check)
+        alt L2 Cache Hit
+            Redis-->>Ingestion: Return cached project ID
+            Ingestion->>Ingestion: Hydrate L1 Cache
+        else L2 Cache Miss
+            Ingestion->>Postgres: SELECT project_id, is_active FROM api_keys (L3 check)
+            alt Key Valid
+                Postgres-->>Ingestion: Return project ID & active status
+                Ingestion->>Redis: SET apikey:<key> (30-day TTL)
+                Ingestion->>Ingestion: Hydrate L1 Cache
+            else Key Invalid/Revoked
+                Postgres-->>Ingestion: Empty/Inactive
+                Ingestion-->>Client: 401 Unauthorized
+            end
+        end
+    end
+
+    %% Idempotency check
+    Ingestion->>Redis: EXISTS idempotency:<eventId>
+    alt Duplicate Detected
+        Redis-->>Ingestion: Key exists
+        Ingestion-->>Client: 409 Conflict (Duplicate Event)
+    else Unique Event
+        Redis-->>Ingestion: Key does not exist
+        Ingestion->>Redis: SET idempotency:<eventId> "processed" (24h TTL)
+        Ingestion->>Ingestion: proto.Marshal(event)
+        Ingestion->>Ingestion: Enqueue to buffered channel
+        Ingestion-->>Client: 202 Accepted
+    end
+
+    %% Batch Flush
+    Note over Ingestion: Batch Size >= 500 OR 50ms timeout
+    Ingestion->>Kinesis: PutRecords(batch entries)
 ```
 
 ### 🔄 Telemetry Event Lifecycle State Diagram
@@ -175,6 +238,30 @@ We implement a single-entry edge reverse proxy pattern (`gateway-go`):
 The Java Analytics service processes event streams using a modular **Pipe-and-Filter pattern** backed by Java's native **Service Provider Interface (SPI)**:
 * Each record undergoes sequential processing filters (Geo-location Lookup ➔ PII Masker ➔ User Agent Classifier).
 * Filters are loaded dynamically via service discovery loaders (`ServiceLoader.load`), allowing developers to deploy new enrichment logic dynamically without rebuilding the core stream processor.
+
+### 🛡️ 5. Multi-Tiered Caching & Deduplication Architecture
+To sustain high ingestion rates without overloading the databases, EventFlow implements a multi-tiered lookup cache and a distributed deduplication barrier:
+
+#### A. API Key Verification Flow (Multi-Tiered)
+To validate key authenticity on every telemetry request, lookups flow down a latency-minimized hierarchy:
+1. **Tier 1: In-Memory L1 Cache (Go Ingestor)**: A fast lookup table (using a `sync.RWMutex` protected Go map) stores validated keys for **1 minute**. This avoids network overhead for repetitive calls from active agents.
+2. **Tier 2: Distributed L2 Cache (Redis)**: If absent from the L1 cache, the ingestor queries Redis (checking key `apikey:<key>`). Valid entries are cached in Redis with a **30-day TTL**.
+3. **Tier 3: Database (PostgreSQL - auth_db)**: On a cache miss in both Tiers 1 and 2, the ingestor queries the PostgreSQL database (`SELECT project_id, is_active FROM api_keys`). If valid, the result propagates upward, hydrating the L2 Redis cache and L1 Go cache.
+
+#### B. Distributed Event Idempotency (Deduplication)
+To prevent duplicate ingestion due to network retries at the agent level:
+1. Every event contains a unique `eventId` UUID.
+2. The Go Ingestor performs a quick Redis lookup (`EXISTS idempotency:<eventId>`).
+3. If the key exists, the ingestor drops the request and responds with a `409 Conflict` status, shielding Kinesis from duplicate event data.
+4. If it is unique, the key is written to Redis with a **24-hour TTL**, and processing continues.
+
+#### C. Database-Level Deduplication Resilience
+If a duplicate event escapes the Go gateway due to cache evictions, the Java Analytics consumer utilizes direct SQL batch updates structured with:
+```sql
+INSERT INTO events (...) VALUES (...) ON CONFLICT (event_id) DO NOTHING
+```
+* **Performance**: Standard JPA databases trigger an expensive `select-before-insert` operation for custom UUID identifiers. By using raw JDBC batch updates with `ON CONFLICT DO NOTHING`, PostgreSQL handles conflicts at the hardware execution index level.
+* **Resilience**: Duplicate events are ignored, preventing exceptions from aborting the current database transaction batch.
 
 ---
 
