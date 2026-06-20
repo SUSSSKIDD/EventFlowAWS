@@ -121,7 +121,6 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 	var targetProxy *httputil.ReverseProxy
 	requiresAuth := true
 
-	// Check route matching logic
 	if strings.HasPrefix(path, "/auth/") {
 		targetProxy = authProxy
 		requiresAuth = false

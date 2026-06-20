@@ -113,7 +113,6 @@ func getEnv(key, fallback string) string {
 func initClients() {
 	ctx := context.Background()
 
-	// 1. PostgreSQL DB Init
 	dbHost := getEnv("DB_HOST", "localhost")
 	dbPort := getEnv("DB_PORT", "5432")
 	dbUser := getEnv("DB_USER", "postgres")
@@ -138,13 +137,11 @@ func initClients() {
 		log.Fatalf("Unable to connect to database: %v", err)
 	}
 
-	// Try pinging
 	if err := dbPool.Ping(ctx); err != nil {
 		log.Fatalf("Database ping failed: %v", err)
 	}
 	log.Println("Successfully connected to PostgreSQL (Tuned Pool)")
 
-	// 2. Redis Init
 	redisHost := getEnv("REDIS_HOST", "localhost")
 	redisPort := getEnv("REDIS_PORT", "6379")
 	redisClient = redis.NewClient(&redis.Options{
@@ -155,7 +152,6 @@ func initClients() {
 	}
 	log.Println("Successfully connected to Redis")
 
-	// 3. Kinesis Init
 	streamName = getEnv("KINESIS_STREAM_NAME", "raw-events-stream")
 	awsEndpoint := getEnv("AWS_ENDPOINT_URL", "http://localhost:4566")
 	awsRegion := getEnv("AWS_REGION", "us-east-1")
@@ -243,7 +239,6 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Extract API Key
 	apiKey := r.Header.Get("X-API-Key")
 	if apiKey == "" {
 		authHeader := r.Header.Get("Authorization")
@@ -252,14 +247,12 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate API Key
 	projectID, err := validateAPIKeyAndGetProjectID(ctx, apiKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	// Acquire request structure from pool
 	req := requestPool.Get().(*IngestEventRequest)
 	defer func() {
 		// Reset fields to avoid leakage or stale data in subsequent pool reuses
@@ -272,13 +265,11 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		requestPool.Put(req)
 	}()
 
-	// Decode body into pooled structure
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(w, "Invalid request JSON", http.StatusBadRequest)
 		return
 	}
 
-	// Validate schema fields
 	if _, err := uuid.Parse(req.EventID); err != nil {
 		http.Error(w, "eventId is required and must be a valid UUID", http.StatusBadRequest)
 		return
@@ -296,10 +287,8 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Force project ID to match the authenticated API key's project ID
 	req.ProjectID = projectID
 
-	// Check idempotency
 	idempotencyKey := "idempotency:" + req.EventID
 	isDuplicate, err := redisClient.Exists(ctx, idempotencyKey).Result()
 	if err != nil {
@@ -310,13 +299,11 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set idempotency key (24-hour TTL)
 	err = redisClient.Set(ctx, idempotencyKey, "processed", 24*time.Hour).Err()
 	if err != nil {
 		log.Printf("Warning: Failed to set idempotency key: %v", err)
 	}
 
-	// Serialize properties map to JSON string
 	propertiesJSONBytes, err := json.Marshal(req.Properties)
 	if err != nil {
 		redisClient.Del(ctx, idempotencyKey)
@@ -324,7 +311,6 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse timestamp to Unix milliseconds
 	var timestampMillis int64 = time.Now().UnixNano() / 1e6
 	if req.Timestamp != nil {
 		if tsStr, ok := req.Timestamp.(string); ok {
@@ -336,7 +322,6 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Populate Protobuf object
 	protoEvent := &pb.AnalyticsEventProto{
 		EventId:         req.EventID,
 		ProjectId:       req.ProjectID,
@@ -346,7 +331,6 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		TimestampMillis: timestampMillis,
 	}
 
-	// Marshal to binary Protobuf
 	payloadBytes, err := proto.Marshal(protoEvent)
 	if err != nil {
 		redisClient.Del(ctx, idempotencyKey)
@@ -354,13 +338,11 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Push to batch writer channel
 	eventChannel <- kinesisTypes.PutRecordsRequestEntry{
 		PartitionKey: aws.String(req.UserID),
 		Data:         payloadBytes,
 	}
 
-	// Metric increment
 	ingestionCounter.WithLabelValues(projectID).Inc()
 
 	w.WriteHeader(http.StatusAccepted)

@@ -251,13 +251,10 @@ public class KinesisConsumerService {
         log.info("Received raw event from Kinesis. Sequence={}", record.sequenceNumber());
 
         try {
-            // 1. Deserialize raw Protobuf event
             AnalyticsEventProto protoEvent = AnalyticsEventProto.parseFrom(payloadBytes);
 
-            // 2. Deserialize properties json string into Map
             Map<String, Object> properties = objectMapper.readValue(protoEvent.getPropertiesJson(), new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
 
-            // 3. Map Protobuf fields to AnalyticsEvent JPA Entity
             AnalyticsEvent event = AnalyticsEvent.builder()
                     .eventId(UUID.fromString(protoEvent.getEventId()))
                     .projectId(UUID.fromString(protoEvent.getProjectId()))
@@ -267,7 +264,6 @@ public class KinesisConsumerService {
                     .timestamp(Instant.ofEpochMilli(protoEvent.getTimestampMillis()))
                     .build();
 
-            // 4. Run through SPI enrichment chain
             for (EventEnricher enricher : enrichers) {
                 long start = System.currentTimeMillis();
                 event = enricher.enrich(event);
